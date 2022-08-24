@@ -135,25 +135,28 @@ class GuidedIterator:
         efps = pd.read_parquet(home / "data" / "EFP.parquet")
 
         # Remove previously selected efps
-        for selected_efp in self.selected_efps:
-            print(f"removing efp: {selected_efp}")
-            efps.drop(columns=[selected_efp], inplace=True)
+        if len(self.selected_efps) > 0:
+            print("removing previously selected efps: ", self.selected_efps)
+            efps.drop(columns=self.selected_efps, inplace=True)
 
         graphs, ados = [], []
-        for iy, (graph, dfi) in enumerate(tqdm(list(efps.items()))):
+        t = tqdm(list(efps.items()))
+        for _, (graph, dfi) in enumerate(t):
+            t.set_description(f"Checking ADO - {graph}")
             # Use the same diff-order sig/bkg pairs to compare with ll predictions
             efp0 = dfi.iloc[idx0].values
             efp1 = dfi.iloc[idx1].values
 
             # Calculate the ado
             ado_val = np.mean(calc_do(fx0=ll0, fx1=ll1, gx0=efp0, gx1=efp1))
+            if ado_val < 0.5:
+                ado_val = 1.0 - ado_val
+
             ados.append(ado_val)
             graphs.append(graph)
-            # Add results to dataframe
         ado_df = pd.DataFrame({"efp": graphs, "ado": ados})
         ado_df = ado_df.sort_values(by=["ado"], ascending=False)
         ado_df.to_csv(self.pass_path / "dif_order_ado_comparison.csv")
-
 
     def train_nn(self):
         # Find the "first" EFP that is most similar to the NN(LL) predictions
@@ -171,11 +174,16 @@ class GuidedIterator:
                                                         y_val,
                                                         test_size=0.5,
                                                         random_state=42)
+        # Train the model
         model = XGBClassifier()
         model.fit(X_train, y_train)
+
+        # Generate predictions on the test data
         predictions = np.hstack(model.predict(X))
         auc_val = roc_auc_score(y_test, np.hstack(model.predict(X_test)))
         print(f"test-set AUC={auc_val:.4}")
+
+        # Store a copy of the HL, LL predictions and the target values (y) for this run
         ll = np.load(home / "data" / "ll_predictions.npy")
         test_df = pd.DataFrame({"hl": predictions, "y": y, "ll": ll})
         test_df.to_parquet(self.pass_path / "test_pred.parquet")
@@ -195,8 +203,9 @@ class GuidedIterator:
             "ado": [0]
             }
         ados = []
-        
-        for self.ix in trange(self.max_iterations):    
+        t = trange(self.max_iterations)
+        for self.ix in t:
+            t.set_description(f"Iteration {self.ix}")    
             # Generate directories for results data
             self.pass_path = self.iteration_path / f"iteration_{self.ix}"
             self.model_path = self.pass_path / "models"
@@ -226,6 +235,8 @@ class GuidedIterator:
             efp_max, ado_max = self.get_max_efp()
             self.selected_efps.append(efp_max)
             ados.append(ado_max)
+
+            # Check if we meet our stop condition or continue
             if auc_val >= self.benchmark:
                 print("Iteration has reached the LL benchmark")
                 print(f"Terminating early on iteration: {self.ix}")
