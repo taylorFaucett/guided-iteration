@@ -1,0 +1,14 @@
+name: guided_iteration
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pandas
+  - numpy
+  - tqdm
+  - scikit-learn
+  - xgboost
+  - pip
+  - pip:
+    - average-decision-ordering
