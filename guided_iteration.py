@@ -1,3 +1,4 @@
+import pathlib
 import random
 import shutil
 
@@ -11,7 +12,6 @@ from tqdm import tqdm
 from xgboost import XGBClassifier
 
 scaler = preprocessing.StandardScaler()
-
 home = pathlib.Path.cwd()
 
 def random_pairs(x, y, l):
@@ -163,8 +163,6 @@ def get_max_efp(ix):
 
 
 def train_nn(ix):
-    prediction_file = pass_path / "test_pred.parquet"
-
     # Find the "first" EFP that is most similar to the NN(LL) predictions
     # Train a simple NN with this first choice
     X, y = data_grabber(selected_efps=selected_efps)
@@ -186,64 +184,58 @@ def train_nn(ix):
     predictions = np.hstack(model.predict(X))
     auc_val = roc_auc_score(y_test, np.hstack(model.predict(X_test)))
     print(f"test-set AUC={auc_val:.4}")
-    ll = h5py.File(path.join(data_dir, "raw", "LL.h5"), "r")["yhat"][:]
+    ll = np.load(home / "data" / "ll_predictions.npy")
     test_df = pd.DataFrame({"hl": predictions, "y": y, "ll": ll})
-    test_df.to_feather(pred_file)
+    test_df.to_feather(pass_path / "test_pred.parquet")
     return auc_val
 
 
-def main():
-    # Names to save things under
-    run_name = "Example"
-    iteration_path = home / "results" / run_name   
-    pathlib.Path(iteration_path).mkdir(parents=True, exist_ok=True)
+# Names to save things under
+run_name = "Example"
+iteration_path = home / "results" / run_name   
+pathlib.Path(iteration_path).mkdir(parents=True, exist_ok=True)
 
-    run_data = {
+ll_auc = 0.859
+selected_efps, aucs, ados = [], [], []
 
-    }
-    #selected_efps, aucs, ados = [], [], []
-    
-    # Starting Conditions
-    ix, ado_max, auc_val = 0, 0, 0
+# Starting Conditions
+ix, ado_max, auc_val = 0, 0, 0
 
-    # Loop for N iterations
-    iterations = 10
-    for ix in range(iterations):
-        # Define data sub-directories
-        pass_path = iteration_path / f"p{ix}"
-        model_path = pass_path / "models"
-        pathlib.Path(model_path).mkdir(parents=True, exist_ok=True)
+# Loop for N iterations
+iterations = 10
+for ix in range(iterations):
+    # Define data sub-directories
+    pass_path = iteration_path / f"p{ix}"
+    model_path = pass_path / "models"
+    pathlib.Path(model_path).mkdir(parents=True, exist_ok=True)
 
-        # Setting the random seed to a predictable value (in this case iteration index)
-        random.seed(ix)
+    # Setting the random seed to a predictable value (in this case iteration index)
+    random.seed(ix)
 
-        # Train a NN using current EFP selections (or just HL when ix=0)
-        auc_val = train_nn(ix)
-        print(f"Iteration {ix} -> AUC: {auc_val:.4}")
+    # Train a NN using current EFP selections (or just HL when ix=0)
+    auc_val = train_nn(ix)
+    print(f"Iteration {ix} -> AUC: {auc_val:.4}")
 
-        # Store the auc results
-        aucs.append(auc_val)
-        pass_list = ["hl6"] + selected_efps
-        ados_list = [np.nan] + ados
-        efp_df = pd.DataFrame({
-            "efp": pass_list,
-            "auc": aucs,
-            "ado": ados_list
-        })
-        efp_df.to_csv(path.join(iteration_path, "selected_efps.csv"))
+    # Store the auc results
+    aucs.append(auc_val)
+    pass_list = ["hl6"] + selected_efps
+    ados_list = [np.nan] + ados
+    efp_df = pd.DataFrame({
+        "efp": pass_list,
+        "auc": aucs,
+        "ado": ados_list
+    })
+    efp_df.to_csv(path.join(iteration_path, "selected_efps.csv"))
 
-        # Isolate random dif-order pairs
-        isolate_order(ix=ix, N_pairs=5e7)
+    # Isolate random dif-order pairs
+    isolate_order(ix=ix, N_pairs=50_000)
 
-        # Check ado with each EFP for most similar DO on dif-order pairs
-        check_efps(ix)
+    # Check ado with each EFP for most similar DO on dif-order pairs
+    check_efps(ix)
 
-        # Get the max EFP and save it
-        efp_max, ado_max = get_max_efp(ix)
-        selected_efps.append(efp_max)
-        print(f"Selected EFPs in Pass {ix}")
-        print(selected_efps)
-        ados.append(ado_max)
-
-if __name__ == "__main__":
-    main()
+    # Get the max EFP and save it
+    efp_max, ado_max = get_max_efp(ix)
+    selected_efps.append(efp_max)
+    print(f"Selected EFPs in Pass {ix}")
+    print(selected_efps)
+    ados.append(ado_max)
