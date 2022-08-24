@@ -9,6 +9,7 @@ dependencies:
   - tqdm
   - scikit-learn
   - xgboost
+  - jupyter
   - pip
   - pip:
     - average-decision-ordering
