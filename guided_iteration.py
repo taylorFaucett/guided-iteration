@@ -29,27 +29,28 @@ def random_pairs(x, y, l):
 
 def data_grabber(selected_efps):
     hl = pd.read_parquet(home / "data" / "HL.parquet")
-    y = data["targets"]
-    X = data.drop(columns=["targets"])
+    y = np.load(home / "data" / "targets.npy")
     if len(selected_efps) > 0:
         efps = pd.read_parquet(home / "data" / "EFP.parquet")
         efp_df = efps[selected_efps]
-        X = pd.concat([X, efp_df], axis=1)
+        X = pd.concat([hl, efp_df], axis=1)
+    else:
+        X = hl.copy()
     X = pd.DataFrame(scaler.fit_transform(X))
     return X, y
 
 
 def isolate_order(ix, N_pairs):
-    if path.isfile(path.join(pass_dir, "dif_order.feather")):
+    if (pass_path / "dif_order.parquet").exists():
         print(f"Skipping isolate_order for pass {ix}")
-        dif_data = pd.read_feather(path.join(pass_dir, "dif_order.feather"))
+        dif_data = pd.read_parquet(pass_path / "dif_order.parquet")
         idxp0 = dif_data["idx0"].values
         idxp1 = dif_data["idx1"].values
         return idxp0, idxp1
 
     # Get the predictions from the previous iteration
-    hl_file = path.join(pass_dir, "test_pred.feather")
-    dfy = pd.read_feather(hl_file)
+    hl_file = pass_path / "test_pred.parquet"
+    dfy = pd.read_parquet(hl_file)
 
     # Separate data into signal and background
     dfy_sb = dfy.groupby("y")
@@ -79,7 +80,7 @@ def isolate_order(ix, N_pairs):
     hl1 = dfy1["hl"].values
 
     # find differently ordered pairs
-    dos = do_calc(fx0=ll0, fx1=ll1, gx0=hl0, gx1=hl1)
+    dos = calc_do(fx0=ll0, fx1=ll1, gx0=hl0, gx1=hl1)
 
     # let's put all of the data and decision-ordering in 1 data frame
     do_df = pd.DataFrame({
@@ -96,63 +97,52 @@ def isolate_order(ix, N_pairs):
     do_df_grp = do_df.groupby("dos")
     dif_df = do_df_grp.get_group(0)
     sim_df = do_df_grp.get_group(1)
-    dif_df.reset_index().to_feather(path.join(pass_dir, "dif_order.feather"))
+    dif_df.reset_index().to_parquet(pass_path / "dif_order.parquet")
 
     return idxp0, idxp1
 
 
 def check_efps(ix):
-    if path.isfile(path.join(pass_dir, "dif_order_ado_comparison.csv")):
+    if (pass_path / "dif_order_ado_comparison.csv").exists():
         print(f"Skipping check_efps for pass {ix}")
         return
 
     # Load the diff-ordering results
-    dif_df = pd.read_feather(path.join(pass_dir, "dif_order.feather"))
+    dif_df = pd.read_parquet(pass_path / "dif_order.parquet")
 
     # Grab the dif-order indices and ll features corresponding to those
     idx0 = dif_df["idx0"].values
     idx1 = dif_df["idx1"].values
     ll0 = dif_df["ll0"].values
     ll1 = dif_df["ll1"].values
-
     print(f"Checking ADO on diff-order subset of size N = {len(dif_df):,}")
 
     # get the efps to check against the dif_order results
-    efps = glob.glob(path.join(efp_dir, "*.feather"))
+    efps = pd.read_parquet(home / "data" / "EFP.parquet")
 
     # Remove previously selected efps
     for selected_efp in selected_efps:
         print(f"removing efp: {selected_efp}")
-        efps.remove(path.join(efp_dir, f"{selected_efp}.feather"))
+        efps.drop(columns=[selected_efp], inplace=True)
 
-    ado_df = pd.DataFrame()
-    ado_max = 0
-    for iy, efp in enumerate(tqdm(efps)):
-        # select the dif-order subset from dif_df for the efp
-        efp_label = efp.split("/")[-1].split(".feather")[0]
-        efp_df = pd.read_feather(efp)
-
+    graphs, ados = [], []
+    for iy, (graph, efp_df) in enumerate(tqdm(list(efps.items()))):
         # Use the same diff-order sig/bkg pairs to compare with ll predictions
-        efp0 = efp_df.iloc[idx0][efp_type].values
-        efp1 = efp_df.iloc[idx1][efp_type].values
+        efp0 = efp_df.iloc[idx0].values
+        efp1 = efp_df.iloc[idx1].values
 
         # Calculate the ado
-        ado_val = ado_calc(fx0=ll0, fx1=ll1, gx0=efp0, gx1=efp1)
-
-        # Calculate the auc
-        #target = list(np.zeros(len(efp0))) + list(np.ones(len(efp1)))
-        #prediction = list(efp0) + list(efp1)
-        #auc_val = roc_auc_score(target, prediction)
-
-        dfi = pd.DataFrame({"efp": efp_label, "ado": ado_val}, index=[iy])
-        ado_df = pd.concat([ado_df, dfi], axis=0)
+        ado_val = np.mean(calc_do(fx0=ll0, fx1=ll1, gx0=efp0, gx1=efp1))
+        ados.append(ado_val)
+        graphs.append(graph)
+        # Add results to dataframe
+    ado_df = pd.DataFrame({"efp": graphs, "ado": ados})
     ado_df = ado_df.sort_values(by=["ado"], ascending=False)
-    ado_df.to_csv(path.join(pass_dir, "dif_order_ado_comparison.csv"))
+    ado_df.to_csv(pass_path / "dif_order_ado_comparison.csv")
 
 
 def get_max_efp(ix):
-    df = pd.read_csv(path.join(pass_dir, "dif_order_ado_comparison.csv"),
-                     index_col=0)
+    df = pd.read_csv(pass_path / "dif_order_ado_comparison.csv", index_col=0)
 
     # sort by max ado
     dfs = df.sort_values(by=["ado"], ascending=False)
@@ -178,7 +168,7 @@ def train_nn(ix):
                                                     y_val,
                                                     test_size=0.5,
                                                     random_state=42)
-
+    print(X_train)
     model = XGBClassifier()
     model.fit(X_train, y_train)
     predictions = np.hstack(model.predict(X))
@@ -186,7 +176,7 @@ def train_nn(ix):
     print(f"test-set AUC={auc_val:.4}")
     ll = np.load(home / "data" / "ll_predictions.npy")
     test_df = pd.DataFrame({"hl": predictions, "y": y, "ll": ll})
-    test_df.to_feather(pass_path / "test_pred.parquet")
+    test_df.to_parquet(pass_path / "test_pred.parquet")
     return auc_val
 
 
@@ -225,7 +215,7 @@ for ix in range(iterations):
         "auc": aucs,
         "ado": ados_list
     })
-    efp_df.to_csv(path.join(iteration_path, "selected_efps.csv"))
+    efp_df.to_csv(iteration_path / "selected_efps.csv")
 
     # Isolate random dif-order pairs
     isolate_order(ix=ix, N_pairs=50_000)
