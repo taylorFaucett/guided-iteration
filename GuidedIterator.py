@@ -225,7 +225,6 @@ class GuidedIterator:
             # Get the max EFP and save it
             efp_max, ado_max = self.get_max_efp()
             self.selected_efps.append(efp_max)
-            print(f"Selected EFPs in Iteration {self.ix}")
             ados.append(ado_max)
             if auc_val >= self.benchmark:
                 print("Iteration has reached the LL benchmark")
