@@ -28,7 +28,7 @@ def random_pairs(x, y, l):
     return df.to_numpy()
 
 def data_grabber(selected_efps):
-    data = pd.read_parquet(home / "data" / "HL.parquet")
+    hl = pd.read_parquet(home / "data" / "HL.parquet")
     y = data["targets"]
     X = data.drop(columns=["targets"])
     if len(selected_efps) > 0:

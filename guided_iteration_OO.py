@@ -16,14 +16,18 @@ class GuidedIterator:
         self.X = X
         self.y = y
 
+    def train_model(self, ix):
 
+
+    def iterate(self, iterations, ado_stop=1.0):
+        for ix in range(iterations):
+            auc_val = self.train_model(ix)
 
 
 def main():
     data = pd.read_parquet(home / "data" / "sample.parquet")
     y = data["targets"]
     X = data.drop(columns=["targets"])
-    print(X, y)
     GI = GuidedIterator(X, y)
 
 
